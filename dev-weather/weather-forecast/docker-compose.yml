@@ -1,0 +1,154 @@
+---
+version: '3'
+services:
+
+  ## MySQL Docker Compose Config
+  mysql-data-processing:
+    container_name: mysql-data-processing
+    image: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_USER: root
+      MYSQL_PASSWORD: mysql
+      MYSQL_DATABASE: data-processing-service
+    volumes:
+      - ./mysql-data-processing:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+
+  ## Mongo Docker Compose Config
+  mongo-location:
+    container_name: mongo-location
+    image: mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    expose:
+      - "27017"
+    volumes:
+      - ./mongo-location:/data/db
+
+  ## Zipkin Docker Compose Config
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+
+  ## Eureka Server Docker Compose Config
+  discovery-server:
+    image: dalijovorkapic/discovery-server:latest
+    container_name: discovery-server
+    ports:
+      - "8761:8761"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      - zipkin
+
+  ## API Gateway Docker Compose Config
+  api-gateway:
+    image: dalijovorkapic/api-gateway:latest
+    container_name: api-gateway
+    ports:
+      - "8181:8080"
+    expose:
+      - "8181"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY= TRACE
+    depends_on:
+      - zipkin
+      - discovery-server
+
+  ## Data Processing Service Docker Compose Config
+  data-processing-service:
+    container_name: data-processing-service
+    image: dalijovorkapic/data-processing-service:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-data-processing:3306/data-processing-service
+    depends_on:
+      - mysql-data-processing
+      - discovery-server
+      - zipkin
+      - api-gateway
+      - broker
+
+  ## Forecast Service Docker Compose Config
+  forecast-service:
+    container_name: forecast-service
+    image: dalijovorkapic/forecast-service:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      - discovery-server
+      - zipkin
+      - api-gateway
+      - broker
+
+  ## Location Service Docker Compose Config
+  location-service:
+    container_name: location-service
+    image: dalijovorkapic/location-service:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      - mongo-location
+      - discovery-server
+      - zipkin
+      - api-gateway
+
+
+  ## Weather Measurement Service Docker Compose Config
+  weather-measurement-service:
+    container_name: weather-measurement-service
+    image: dalijovorkapic/weather-measurement-service:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-data-processing:3306/data-processing-service
+    depends_on:
+      - mysql-data-processing
+      - discovery-server
+      - zipkin
+      - api-gateway
+      - broker
+
+  ## Notification Service Docker Compose Config
+  notification-service:
+    container_name: notification-service
+    image: dalijovorkapic/notification-service:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      - discovery-server
+      - zipkin
+      - api-gateway
+      - broker
+
+  ## Kafka Docker Compose Config
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: broker
+    ports:
+      # To learn about configuring Kafka for access across networks see
+      # https://www.confluent.io/blog/kafka-client-cannot-connect-to-broker-on-aws-on-docker-etc/
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
